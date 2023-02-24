@@ -7,6 +7,9 @@ from scipy.stats.mstats import winsorize
 from sklearn import preprocessing
 from sklearn.impute import SimpleImputer
 import matplotlib.pyplot as plt
+import warnings
+
+warnings.filterwarnings("ignore")
 pd.set_option("display.max_columns", None)
 
 
@@ -73,7 +76,23 @@ class FeatureDataFrame:
             self.__stack()
             
         return self
-# endregion
+
+    def fill_na(self):
+        columns = self.data.columns[2:]
+        tmp = self.data.groupby('datetime')[columns].transform('mean')
+        self.data.iloc[:,2:] = self.data.iloc[:,2:].fillna(tmp)
+        self.data = self.data.fillna(0)
+        return self
+
+    def get_zscore(self):
+        columns = self.data.columns[2:]
+        def scale(x):
+            x.iloc[:,:] = preprocessing.scale(x)
+            return x
+        self.data.iloc[:,2:] = self.data.groupby('datetime')[columns].apply(lambda x: scale(x))
+        return self
+
+
 
 
 class LabelDataFrame:
@@ -111,6 +130,11 @@ class LabelDataFrame:
         self.data["return"] = self.data["return"].fillna(0)
 
         return self
+    
+    def rank_norm(self):
+        self.data['return'] = (self.data.groupby(['trade_date'])['return'].rank(pct=True) - 0.5)*3.4624
+        return self
+
 
 
 class ProcessArray:
@@ -191,13 +215,13 @@ def main():
                 "column_save_path":"/home/qianshuofu/factor_qianshuofu/Data/data_column.npy"}
 
     df_asset_pool = pd.read_csv(path_dict['asset_pool_path'])
-    df_feature = FeatureDataFrame(pd.read_feather(path_dict["feature_path"])).filter_asset(df_asset_pool).change_shape(unstack=True) #.drop_samevalue()
-    df_label = LabelDataFrame(pd.read_feather(path_dict['label_path'])).get_return()
+    df_feature = FeatureDataFrame(pd.read_feather(path_dict["feature_path"])).filter_asset(df_asset_pool).change_shape(unstack=True).fill_na().get_zscore() #.drop_samevalue()
+    df_label = LabelDataFrame(pd.read_feather(path_dict['label_path'])).get_return().rank_norm()
     df_merge = merge_feature_label(df_feature.data,df_label.data)
 
     data_index,data_feature,data_label,data_column = split_index_feature_label(df_merge)
-    data_feature.fill_na().get_zscore(limit_extreme_value=False)
-    data_label.get_zscore(limit_extreme_value=False)
+    # data_feature.fill_na().get_zscore(limit_extreme_value=False)
+    # data_label.get_zscore(limit_extreme_value=False)
 
     np.save(path_dict['index_save_path'],data_index.array)
     np.save(path_dict['feature_save_path'],data_feature.array)

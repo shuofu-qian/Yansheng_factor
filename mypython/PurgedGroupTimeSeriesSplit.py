@@ -4,61 +4,126 @@ from sklearn.model_selection._split import _BaseKFold, indexable, _num_samples
 from sklearn.utils.validation import _deprecate_positional_args
 
 class PurgedGroupTimeSeriesSplit(_BaseKFold):
+    """Time Series cross-validator variant with non-overlapping groups.
+    Allows for a gap in groups to avoid potentially leaking info from
+    train into test if the model has windowed or lag features.
+    Provides train/test indices to split time series data samples
+    that are observed at fixed time intervals according to a
+    third-party provided group.
+    In each split, test indices must be higher than before, and thus shuffling
+    in cross validator is inappropriate.
+    This cross-validation object is a variation of :class:`KFold`.
+    In the kth split, it returns first k folds as train set and the
+    (k+1)th fold as test set.
+    The same group will not appear in two different folds (the number of
+    distinct groups has to be at least equal to the number of folds).
+    Note that unlike standard cross-validation methods, successive
+    training sets are supersets of those that come before them.
+    ----------
+    n_splits : int, default=5
+        Number of splits. Must be at least 2.
+    max_train_group_size : int, default=Inf
+        Maximum group size for a single training set.
+    group_gap : int, default=None
+        Gap between train and test
+    max_test_group_size : int, default=Inf
+    """
 
     @_deprecate_positional_args
-    def __init__(self, n_splits=5, *, n_groups=50, group_train_size=30, group_test_size=6, group_gap=2, verbose=False):
+    def __init__(self,
+                 n_splits=5,
+                 *,
+                 max_train_group_size=np.inf,
+                 max_test_group_size=np.inf,
+                 group_gap=0,
+                 verbose=False
+                 ):
         super().__init__(n_splits, shuffle=False, random_state=None)
-        self.n_groups = n_groups
-        self.group_train_size = group_train_size
-        self.group_test_size = group_test_size
+        self.max_train_group_size = max_train_group_size
         self.group_gap = group_gap
+        self.max_test_group_size = max_test_group_size
         self.verbose = verbose
-    
-    def split(self, X, y=None):
-        n_groups = self.n_groups
-        group_train_size = self.group_train_size
-        group_test_size = self.group_test_size
-        group_gap = self.group_gap
 
-        X, y = indexable(X, y)
+    def split(self, X, y=None, groups=None):
+        """Generate indices to split data into training and test set.
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Training data, where n_samples is the number of samples
+            and n_features is the number of features.
+        y : array-like of shape (n_samples,)
+            Always ignored, exists for compatibility.
+        groups : array-like of shape (n_samples,)
+            Group labels for the samples used while splitting the dataset into
+            train/test set.
+        Yields
+        ------
+        train : ndarray
+            The training set indices for that split.
+        test : ndarray
+            The testing set indices for that split.
+        """
+        if groups is None:
+            raise ValueError(
+                "The 'groups' parameter should not be None")
+        X, y, groups = indexable(X, y, groups)
         n_samples = _num_samples(X)
         n_splits = self.n_splits
-
-        assert (group_train_size + group_gap + group_test_size + self.n_splits*1) <= n_groups, \
-                "The group nums of test and train set is not sensible"
-
+        group_gap = self.group_gap
+        max_test_group_size = self.max_test_group_size
+        max_train_group_size = self.max_train_group_size
+        n_folds = n_splits + 1
         group_dict = {}
-        groups = np.sort(np.array(list(range(n_groups))*np.ceil(n_samples/n_groups).astype('int'))[:n_samples])
-        unique_groups, ind = np.unique(groups, return_index=True)
-
+        u, ind = np.unique(groups, return_index=True)
+        unique_groups = u[np.argsort(ind)]
+        n_samples = _num_samples(X)
+        n_groups = _num_samples(unique_groups)
         for idx in np.arange(n_samples):
             if (groups[idx] in group_dict):
                 group_dict[groups[idx]].append(idx)
             else:
                 group_dict[groups[idx]] = [idx]
-        
-        group_slip = int((n_groups - (group_train_size + group_gap + group_test_size))/(n_splits-1))
-        group_train_starts = range(0, n_splits*group_slip, group_slip)
-
-        splits = 1
-        for group_train_start in group_train_starts:
+        if n_folds > n_groups:
+            raise ValueError(
+                ("Cannot have number of folds={0} greater than"
+                 " the number of groups={1}").format(n_folds,
+                                                     n_groups))
+        print('n_groups:{},n_folds:{},n_splits:{}'.format(n_groups,n_folds,n_splits))
+        group_test_size = min(n_groups // n_folds, max_test_group_size)
+        group_test_starts = range(n_groups - n_splits * (group_test_size-2),
+                                  n_groups, group_test_size-2)
+        print('group_test_starts:{}'.format(group_test_starts))
+        for group_test_start in group_test_starts:
             train_array = []
             test_array = []
 
-            for i in range(group_train_start, group_train_start+group_train_size):
-                train_array += group_dict[i]
-            for i in range(group_train_start+group_train_size+group_gap, group_train_start+group_train_size+group_gap+group_test_size):
-                test_array += group_dict[i]
+            group_st = max(0, group_test_start - group_gap - max_train_group_size)
+            for train_group_idx in unique_groups[group_st:(group_test_start - group_gap)]:
+                train_array_tmp = group_dict[train_group_idx]
+                
+                train_array = np.sort(np.unique(
+                                      np.concatenate((train_array,
+                                                      train_array_tmp)),
+                                      axis=None), axis=None)
+
+            train_end = train_array.size
+ 
+            for test_group_idx in unique_groups[group_test_start:
+                                                group_test_start +
+                                                group_test_size]:
+                test_array_tmp = group_dict[test_group_idx]
+                test_array = np.sort(np.unique(
+                                              np.concatenate((test_array,
+                                                              test_array_tmp)),
+                                     axis=None), axis=None)
+
+            test_array  = test_array[group_gap:]
             
-            if splits == n_splits:
-                for j in range(i,n_groups):
-                    test_array += group_dict[j]
-
+            
             if self.verbose > 0:
-                pass
-
+                    pass
+                    
             yield [int(i) for i in train_array], [int(i) for i in test_array]
-            splits += 1
 
 
 from matplotlib.colors import ListedColormap

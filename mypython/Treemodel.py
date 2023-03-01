@@ -44,3 +44,6 @@ class MyDTRegressor2(sklearn.tree._classes.DecisionTreeRegressor):
 #     def get_params(self):
 #         return self.__dict__
 
+
+class Feature_lightgbm():
+    pass

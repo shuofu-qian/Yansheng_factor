@@ -128,13 +128,6 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
                     
             yield [int(i) for i in train_array], [int(i) for i in test_array]
 
-    # def __init__(self,
-    #              n_splits=5,
-    #              *,
-    #              max_train_group_size=np.inf,
-    #              max_test_group_size=np.inf,
-    #              group_gap=0,
-    #              verbose=False
 
     def split_2(self, X, y=None, groups=None, train_test_size_ratio=4):
         """Split dataset into n_splits with following rules:

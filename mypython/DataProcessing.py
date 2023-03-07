@@ -111,26 +111,36 @@ class LabelDataFrame:
         self.data.sort_values(["symbol_id","trade_date"],inplace=True)
         fre_num = int(return_frequency[:-1])
 
+        self.data['today_return_oc'] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0)/\
+                                               self.data.groupby("symbol_id")[adj_str+"open_price"].shift(0) )
+        self.data['today_return_cc'] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0)/\
+                                               self.data.groupby("symbol_id")[adj_str+"close_price"].shift(1) )
+
         if close_open:
-            self.data["return"] = np.log( self.data[adj_str+"close_price"]/self.data[adj_str+"open_price"] )
+            self.data["return"] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
+                                          self.data.groupby("symbol_id")[adj_str+"open_price"].shift(-1) )
         else:
-            if return_frequency[-1] == "d":
-                self.data["return"] = np.log( self.data[["symbol_id",adj_str+"close_price"]].groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
-                                              self.data[["symbol_id",adj_str+"close_price"]].groupby("symbol_id")[adj_str+"close_price"].shift(0) )
-            elif return_frequency[-1] == "m":
-                self.data["year_month"] = self.data["trade_date"].apply(lambda x: x[0:6])
-                temp_df = self.data[["symbol_id",adj_str+"close_price","year_month"]].groupby(["symbol_id","year_month"]).last().reset_index()
-                temp_df["return"] = np.log( temp_df.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
-                                            temp_df.groupby("symbol_id")[adj_str+"close_price"].shift(0) )
-                self.data = pd.merge(self.data,temp_df[["symbol_id","year_month","return"]], how = "left", on = ["symbol_id","year_month"])          
-                self.data = self.data.drop(columns = ["year_month"]) 
-            else:
-                raise Exception("The value of return_frequency is set wrong")                   
-
+            self.data['return'] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
+                                          self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0) )
+            # if return_frequency[-1] == "d":
+            #     self.data["return"] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
+            #                                   self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0) )
+            # elif return_frequency[-1] == "m":
+            #     self.data["year_month"] = self.data["trade_date"].apply(lambda x: x[0:6])
+            #     temp_df = self.data[["symbol_id",adj_str+"close_price","year_month"]].groupby(["symbol_id","year_month"]).last().reset_index()
+            #     temp_df["return"] = np.log( temp_df.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
+            #                                 temp_df.groupby("symbol_id")[adj_str+"close_price"].shift(0) )
+            #     self.data = pd.merge(self.data,temp_df[["symbol_id","year_month","return"]], how = "left", on = ["symbol_id","year_month"])          
+            #     self.data = self.data.drop(columns = ["year_month"]) 
+            # else:
+            #     raise Exception("The value of return_frequency is set wrong")         
+                     
+        self.data["today_return_oc"] = self.data["today_return_oc"].fillna(0)
+        self.data["today_return_cc"] = self.data["today_return_cc"].fillna(0)
         self.data["return"] = self.data["return"].fillna(0)
-
+        # self.data["rank_return"] = self.data["return"]
         return self
-    
+
     def rank_norm(self):
         self.data['return'] = (self.data.groupby(['trade_date'])['return'].rank(pct=True) - 0.5)*3.4624
         return self
@@ -187,7 +197,7 @@ def merge_feature_label(df_feature,df_label) -> pd.DataFrame:
     df_feature['trade_date'] = df_feature['datetime'].apply(lambda x: x[:10].replace("-",""))
     df_feature['symbol_id'] = df_feature['asset']
 
-    df_merge = pd.merge(df_feature,df_label[["trade_date","symbol_id","return"]],how = "inner",on = ["trade_date","symbol_id"])
+    df_merge = pd.merge(df_feature,df_label[["trade_date","symbol_id","today_return_oc","today_return_cc","return"]],how = "inner",on = ["trade_date","symbol_id"])
     df_merge = df_merge.drop(columns = ["trade_date","symbol_id"]).reset_index(drop = True)
     df_merge = df_merge.sort_values(by=['datetime','asset'])
 
@@ -197,26 +207,30 @@ def split_index_feature_label(df_merge) -> tuple:
     """Split the merged data into three parts: pa_index,pa_feature,pa_label. whose indexs are matched"""
     
     data_index = ProcessArray(df_merge.iloc[:,:2])
-    data_feature = ProcessArray(df_merge.iloc[:,2:-1])
-    data_label = ProcessArray(df_merge.iloc[:,-1])
-    data_column = ProcessArray(df_merge.columns)
+    data_feature = ProcessArray(df_merge.iloc[:,2:-3])
+    data_label = ProcessArray(df_merge.iloc[:,-3:])
+    data_column = ProcessArray(df_merge.columns[2:-3])
 
     return data_index, data_feature, data_label, data_column
 
 
-def main():
+def main(close_open=True, return_frequency='1d'):
+    
+    close_open_string = close_open and 'oc' or 'cc'
+    fre_num = int(return_frequency[:-1])
+
     path_dict = {"asset_pool_path":"/sda/intern_data_shuofu/industry_1070.csv",
                 "feature_path": "/home/qianshuofu/factor_qianshuofu/Data/30_minutes_data.feather",
                 "label_path": "/home/qianshuofu/factor_qianshuofu/Data/adj_prices.feather",
 
                 "index_save_path": "/home/qianshuofu/factor_qianshuofu/Data/data_index.npy",
                 "feature_save_path": "/home/qianshuofu/factor_qianshuofu/Data/data_feature.npy",
-                "label_save_path": "/home/qianshuofu/factor_qianshuofu/Data/data_label.npy",
+                "label_save_path": "/home/qianshuofu/factor_qianshuofu/Data/data_label_{}_{}.npy".format(close_open_string,fre_num),
                 "column_save_path":"/home/qianshuofu/factor_qianshuofu/Data/data_column.npy"}
 
     df_asset_pool = pd.read_csv(path_dict['asset_pool_path'])
     df_feature = FeatureDataFrame(pd.read_feather(path_dict["feature_path"])).filter_asset(df_asset_pool).change_shape(unstack=True).fill_na().get_zscore() #.drop_samevalue()
-    df_label = LabelDataFrame(pd.read_feather(path_dict['label_path'])).get_return().rank_norm()
+    df_label = LabelDataFrame(pd.read_feather(path_dict['label_path'])).get_return(return_frequency=return_frequency,close_open=close_open).rank_norm()
     df_merge = merge_feature_label(df_feature.data,df_label.data)
 
     data_index,data_feature,data_label,data_column = split_index_feature_label(df_merge)

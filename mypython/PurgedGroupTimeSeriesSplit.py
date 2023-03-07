@@ -129,7 +129,7 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
             yield [int(i) for i in train_array], [int(i) for i in test_array]
 
 
-    def split_2(self, X, y=None, groups=None, train_test_size_ratio=4):
+    def split_2(self, X, y=None, groups=None, train_test_size_ratio=4,splits_minus=0):
         """Split dataset into n_splits with following rules:
         1.train_group_size is train_test_size_ratio times test_group_size
         2.if concatenating test_groups in different splits, they are continuous
@@ -139,7 +139,7 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
 
         X, y, groups = indexable(X, y, groups)
         n_samples = _num_samples(X)
-        n_splits = self.n_splits
+        n_splits = self.n_splits - splits_minus
         group_gap = self.group_gap
         max_test_group_size = self.max_test_group_size
         max_train_group_size = self.max_train_group_size
@@ -226,7 +226,7 @@ def plot_ic(y,test_index_list,y_pred_list,groups,ma=1,continuous=False):
     """
 
     if continuous:
-        fig = plt.figure(figsize=(10,6))
+        fig, ax = plt.subplots(figsize=(10,6))
         tmp_index = sum(test_index_list,[])
         tmp_y_true = y[tmp_index]
         tmp_y_pred = np.concatenate(y_pred_list)
@@ -235,10 +235,11 @@ def plot_ic(y,test_index_list,y_pred_list,groups,ma=1,continuous=False):
         u,ic = calculate_ic(tmp_y_true, tmp_y_pred, tmp_groups)
         ma_ic = np.concatenate(([np.nan]*(ma-1),np.convolve(ic,np.ones(ma),'valid')/ma))
 
-        plt.plot(u,ic)
-        plt.plot(u,ma_ic,color='red')
-        plt.xticks(np.arange(0,len(u),len(u)//4))
-        plt.title('IC for: {} ~ {} (MA:{})'.format(tmp_groups[0],tmp_groups[-1],ma))
+        ax.plot(u,ic)
+        ax.plot(u,ma_ic,color='red')
+        ax.set_xticks(np.arange(0,len(u),len(u)//4))
+        ax.set_title('IC for: {} ~ {} (MA:{})'.format(tmp_groups[0],tmp_groups[-1],ma))
+        plt.text(0.35,0.92,'IC_mean: {}'.format(np.array(ic).mean()), bbox=dict(facecolor='yellow', alpha=0.5), transform = ax.transAxes)
 
     else:
         n_splits = len(test_index_list)
@@ -258,17 +259,18 @@ def plot_ic(y,test_index_list,y_pred_list,groups,ma=1,continuous=False):
             ax.plot(u,ma_ic,color='red')
             ax.set(xticks=np.arange(0,len(u),len(u)//4))
             ax.set_title('IC for cv_split:{}: {} ~ {} (MA:{})'.format(i+1,tmp_groups[0],tmp_groups[-1],ma))
+            plt.text(0.25,0.92,'IC_mean: {}'.format(np.array(ic).mean()), bbox=dict(facecolor='yellow', alpha=0.5), transform = ax.transAxes)
 
 
 
 # this is code slightly modified from the sklearn docs here:
 # https://scikit-learn.org/stable/auto_examples/model_selection/plot_cv_indices.html#sphx-glr-auto-examples-model-selection-plot-cv-indices-py
-def plot_cv_indices(cv, X, y, groups, ax, lw=10, split_method=True):
+def plot_cv_indices(cv, X, y, groups, ax, lw=10, split_method=True,splits_minus=0):
     """Create a sample plot for indices of a cross-validation object.
     split_method: if True: use cv.split() else: use cv.split_2()
     """
     
-    n_splits = cv.n_splits
+    n_splits = cv.n_splits - splits_minus
     cmap_cv = plt.cm.coolwarm
 
     jet = plt.cm.get_cmap('jet', 256)
@@ -287,7 +289,7 @@ def plot_cv_indices(cv, X, y, groups, ax, lw=10, split_method=True):
     if split_method:
         split_result = cv.split(X=X, y=y, groups=groups)
     else:
-        split_result = cv.split_2(X=X, y=y, groups=groups)
+        split_result = cv.split_2(X=X, y=y, groups=groups,splits_minus=splits_minus)
 
     # Generate the training/testing visualizations for each CV split
     for ii, (tr, tt) in enumerate(split_result):

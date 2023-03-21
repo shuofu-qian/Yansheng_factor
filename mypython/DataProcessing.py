@@ -99,7 +99,7 @@ class LabelDataFrame:
     def __init__(self,data:pd.DataFrame):
         self.data = data
     
-    def get_return(self, adj = False, return_frequency = "1d", close_open = False):
+    def get_return(self, adj = False, return_frequency = "1d", return_type = 'return_oo'):
         """Sort the data by code and time, append a new column naming 'return' in the last with NaN being filled with 0
         
         adj:                    whether to calculate using adj price, default == False
@@ -113,15 +113,28 @@ class LabelDataFrame:
 
         self.data['today_return_oc'] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0)/\
                                                self.data.groupby("symbol_id")[adj_str+"open_price"].shift(0) )
-        self.data['today_return_cc'] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0)/\
+        self.data['today_return_co'] = np.log( self.data.groupby("symbol_id")[adj_str+"open_price"].shift(0)/\
                                                self.data.groupby("symbol_id")[adj_str+"close_price"].shift(1) )
-
-        if close_open:
-            self.data["return"] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
-                                          self.data.groupby("symbol_id")[adj_str+"open_price"].shift(-1) )
-        else:
+        # if close_open:
+        #     self.data["return"] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
+        #                                   self.data.groupby("symbol_id")[adj_str+"open_price"].shift(-1) )
+        # else:
+        #     self.data['return'] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
+        #                                   self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0) )
+            
+        if return_type == 'return_oc':
             self.data['return'] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
+                                          self.data.groupby("symbol_id")[adj_str+"open_price"].shift(-1) )
+        elif return_type == 'return_cc':
+            self.data['return'] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
+                                          self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0) )        
+        elif return_type == 'return_oo':
+            self.data['return'] = np.log( self.data.groupby("symbol_id")[adj_str+"open_price"].shift(-fre_num-1)/\
+                                          self.data.groupby("symbol_id")[adj_str+"open_price"].shift(-1) )
+        elif return_type == 'return_co':
+            self.data['return'] = np.log( self.data.groupby("symbol_id")[adj_str+"open_price"].shift(-fre_num)/\
                                           self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0) )
+
             # if return_frequency[-1] == "d":
             #     self.data["return"] = np.log( self.data.groupby("symbol_id")[adj_str+"close_price"].shift(-fre_num)/\
             #                                   self.data.groupby("symbol_id")[adj_str+"close_price"].shift(0) )
@@ -136,7 +149,7 @@ class LabelDataFrame:
             #     raise Exception("The value of return_frequency is set wrong")         
                      
         self.data["today_return_oc"] = self.data["today_return_oc"].fillna(0)
-        self.data["today_return_cc"] = self.data["today_return_cc"].fillna(0)
+        self.data['today_return_co'] = self.data["today_return_co"].fillna(0)
         self.data["return"] = self.data["return"].fillna(0)
         # self.data["rank_return"] = self.data["return"]
         return self
@@ -197,7 +210,7 @@ def merge_feature_label(df_feature,df_label) -> pd.DataFrame:
     df_feature['trade_date'] = df_feature['datetime'].apply(lambda x: x[:10].replace("-",""))
     df_feature['symbol_id'] = df_feature['asset']
 
-    df_merge = pd.merge(df_feature,df_label[["trade_date","symbol_id","today_return_oc","today_return_cc","return"]],how = "inner",on = ["trade_date","symbol_id"])
+    df_merge = pd.merge(df_feature,df_label[["trade_date","symbol_id","today_return_oc","today_return_co","return"]],how = "inner",on = ["trade_date","symbol_id"])
     df_merge = df_merge.drop(columns = ["trade_date","symbol_id"]).reset_index(drop = True)
     df_merge = df_merge.sort_values(by=['datetime','asset'])
 
@@ -214,9 +227,41 @@ def split_index_feature_label(df_merge) -> tuple:
     return data_index, data_feature, data_label, data_column
 
 
-def main(close_open=True, return_frequency='1d'):
-    
-    close_open_string = close_open and 'oc' or 'cc'
+
+def return_vwap(df_vwap,df_index):
+    # df_vwap = pd.read_feather('/home/qianshuofu/factor_qianshuofu/Data/30min_kbars_adjuested_1335.ftr')
+    # df_index = pd.DataFrame(np.load('/home/qianshuofu/factor_qianshuofu/Data/data_index.npy',allow_pickle=True),columns=['code','datetime'])
+
+    df_vwap = df_vwap.rename(columns={'asset':'code'})
+    df_vwap['minute'] = df_vwap['datetime'].apply(lambda x: str(x)[11:])
+    df_vwap['datetime'] = df_vwap['datetime'].apply(lambda x: str(x)[:10])
+    df_vwap = df_vwap.dropna(how='all',subset=['Open','High','Low','Close','VWAP'])
+    df_vwap = df_vwap.sort_values(['code','datetime','minute'])
+
+    df_return_oc = pd.DataFrame(np.log(df_vwap.groupby(['code','datetime'])['VWAP'].last() / df_vwap.groupby(['code','datetime'])['VWAP'].first())).reset_index()
+    df_return_oc.columns = ['code','datetime','return_oc']
+    df_return_co = df_vwap.groupby(['code','datetime'])['VWAP'].aggregate(['first','last']).reset_index()
+    df_return_co['last'] = df_return_co.groupby(['code'])['last'].shift(1)
+    df_return_co['return_co'] = np.log(df_return_co['first']/df_return_co['last'])
+
+    df_return_oc['return_oc'] = df_return_oc['return_oc'].fillna(0)
+    df_return_co['return_co'] = df_return_co['return_co'].fillna(0)
+
+    df_return_oc = pd.merge(df_index,df_return_oc,how='left',on=['code','datetime'])
+    df_return_co = pd.merge(df_index,df_return_co,how='left',on=['code','datetime'])
+
+    np.save('/home/qianshuofu/factor_qianshuofu/Data/data_return_oc_vwap.npy',df_return_oc['return_oc'])
+    np.save('/home/qianshuofu/factor_qianshuofu/Data/data_return_co_vwap.npy',df_return_co['return_co'])
+
+
+
+def main(return_type='return_oo', return_frequency='1d'):
+    """
+    return_type: ['return_co','return_cc','return_oo','return_oc']
+    return_frequency: '1d'
+    """
+
+    close_open_string = return_type[-2:]
     fre_num = int(return_frequency[:-1])
 
     path_dict = {"asset_pool_path":"/sda/intern_data_shuofu/industry_1070.csv",
@@ -230,7 +275,7 @@ def main(close_open=True, return_frequency='1d'):
 
     df_asset_pool = pd.read_csv(path_dict['asset_pool_path'])
     df_feature = FeatureDataFrame(pd.read_feather(path_dict["feature_path"])).filter_asset(df_asset_pool).change_shape(unstack=True).fill_na().get_zscore() #.drop_samevalue()
-    df_label = LabelDataFrame(pd.read_feather(path_dict['label_path'])).get_return(return_frequency=return_frequency,close_open=close_open).rank_norm()
+    df_label = LabelDataFrame(pd.read_feather(path_dict['label_path'])).get_return(return_frequency=return_frequency,return_type=return_type).rank_norm()
     df_merge = merge_feature_label(df_feature.data,df_label.data)
 
     data_index,data_feature,data_label,data_column = split_index_feature_label(df_merge)
@@ -239,8 +284,11 @@ def main(close_open=True, return_frequency='1d'):
 
     np.save(path_dict['index_save_path'],data_index.array)
     np.save(path_dict['feature_save_path'],data_feature.array)
-    np.save(path_dict['label_save_path'],data_label.array)
+    np.save(path_dict['label_save_path'],data_label.array[:,-1])
     np.save(path_dict['column_save_path'],data_column.array)
+
+    np.save("/home/qianshuofu/factor_qianshuofu/Data/data_return_oc.npy",data_label.array[:,0])
+    np.save("/home/qianshuofu/factor_qianshuofu/Data/data_return_co.npy",data_label.array[:,1])
 
 if __name__ == '__main__':
     main()

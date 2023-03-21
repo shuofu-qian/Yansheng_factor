@@ -87,3 +87,77 @@ def strategy_return(Y,y_pred,groups,hold_days,ahead_steps,close_open,long_ratio=
 
 def model_strategy_return():
     pass
+
+
+def backtest(y_pred,groups,return_oc,return_co,return_type,long_ratio=0.1,short_ratio=0.1,cost_ratio=0.0035):
+    def _calculate(y_pred,groups,return_oc,return_co,return_type,long_ratio,short_ratio,cost_ratio):
+      df = pd.DataFrame({'code':groups[:,0],'datetime':groups[:,1],'return_oc':return_oc,'return_co':return_co,'y_pred':y_pred,'oc_status':0,'co_status':0})
+      df['y_pred'] = df.groupby(['code'])['y_pred'].shift(1)
+      df['y_pred'] = df.groupby(['datetime'])['y_pred'].rank(pct=True)
+
+      def oc_status(x):
+        x['oc_status'] = x['oc_status'] + (x['y_pred'] > (1-long_ratio)).astype('int')
+        x['oc_status'] = x['oc_status'] - (x['y_pred'] < short_ratio).astype('int')
+        return x
+      
+      def co_status(x):
+        x['co_status'] = x['co_status'] + (x['y_pred'] > (1-long_ratio)).astype('int')
+        x['co_status'] = x['co_status'] - (x['y_pred'] < short_ratio).astype('int')
+        return x
+        
+      df['oc_status'] = df.groupby(['datetime']).apply(lambda x: oc_status(x))['oc_status']
+      df['co_status'] = df.groupby(['datetime']).apply(lambda x: co_status(x))['co_status']
+
+      if return_type == 'return_co':
+        df['return'] = df['co_status']*df['return_co']
+        df_return = df.groupby(['datetime']).apply(lambda x: x['return'].sum()/abs(x['co_status']).sum())
+      elif return_type == 'return_cc':
+        df['return'] = df['co_status']*df['return_co'] + df['oc_status']*df['return_oc']
+        df_return = df.groupby(['datetime']).apply(lambda x: x['return'].sum()/abs(x['co_status']).sum())
+      elif return_type == 'return_oc':
+        df['return'] = df['oc_status']*df['return_oc']
+        df_return = df.groupby(['datetime']).apply(lambda x: x['return'].sum()/abs(x['oc_status']).sum())
+      elif return_type == 'return_oo':
+        df['co_status'] = df.groupby(['code'])['co_status'].shift(1)
+        df['co_status'] = df['co_status'].fillna(0)
+        df['return1'] = df['co_status']*df['return_co']
+        df['return2'] = df['oc_status']*df['return_oc']
+        df_return = df.groupby(['datetime']).apply(lambda x: x['return1'].sum()/abs(x['co_status']).sum()+x['return2'].sum()/abs(x['oc_status']).sum())
+      else:
+        raise 'return_type is set wrong'
+
+      df_return = df_return - cost_ratio
+      u,daily_return = np.array(df_return.index), np.array(df_return.fillna(0))
+      return u, daily_return
+     
+    u,daily_return = _calculate(y_pred,groups,return_oc,return_co,return_type,long_ratio,short_ratio,cost_ratio)
+    u,daily_return_long = _calculate(y_pred,groups,return_oc,return_co,return_type,long_ratio,0,cost_ratio)
+    u,daily_return_short = _calculate(y_pred,groups,return_oc,return_co,return_type,0,short_ratio,cost_ratio)
+
+    daily_return_long = np.array(daily_return_long)*(long_ratio/(long_ratio+short_ratio))
+    daily_return_short = np.array(daily_return_short)*(short_ratio/(long_ratio+short_ratio))
+
+    cum_return = np.cumsum(daily_return)
+    cum_return_long = np.cumsum(daily_return_long)
+    cum_return_short = np.cumsum(daily_return_short)
+    riskfree_rate = 0.0001
+
+    return_mean = np.mean(daily_return)
+    return_std  = np.std(daily_return)
+    return_sharpe = (return_mean-riskfree_rate)/return_std*np.sqrt(252)
+    return_maxdown = (cum_return - np.maximum.accumulate(cum_return)).min()
+
+    fig, ax = plt.subplots(figsize=(10,6))
+    ax.plot(pd.to_datetime(u),cum_return,color='black')
+    ax.plot(pd.to_datetime(u),cum_return_long,color='red')
+    ax.plot(pd.to_datetime(u),cum_return_short,color='green')
+    ax.legend(['long_short','long','short'],loc='upper right',)
+    ax.set_title('PNL from {} ~ {}'.format(u[0],u[-1]))
+    ax.text(0.02,0.85,'daily_mean:    {:.2%}\ndaily_std:        {:.2%}\nsharpe:           {:.2f}\nmaxdown:      {:.2%}'.format(return_mean,return_std,return_sharpe,return_maxdown),bbox=dict(facecolor='yellow', alpha=0.5),transform=ax.transAxes)
+    # ax.text(0.02,0.78,'{} days ahead predict'.format(ahead_steps),bbox=dict(facecolor='red', alpha=0.5),transform=ax.transAxes)
+    # ax.text(0.02,0.71,'Holding for {} days     '.format(hold_days),bbox=dict(facecolor='green', alpha=0.5),transform=ax.transAxes)
+    ax.text(0.02,0.78,'return_type: {}'.format(return_type),bbox=dict(facecolor='orange', alpha=0.5),transform=ax.transAxes)
+    ax.text(0.02,0.71,'Paras:{}'.format((long_ratio,short_ratio,cost_ratio)),bbox=dict(facecolor='grey', alpha=0.5),transform=ax.transAxes)
+
+    return u, daily_return
+      

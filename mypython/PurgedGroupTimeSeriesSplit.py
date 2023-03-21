@@ -47,7 +47,7 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
         self.max_test_group_size = max_test_group_size
         self.verbose = verbose
 
-    def split(self, X, y=None, groups=None):
+    def split(self, X, y=None, group=None):
         """Generate indices to split data into training and test set.
         Parameters
         ----------
@@ -56,7 +56,7 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
             and n_features is the number of features.
         y : array-like of shape (n_samples,)
             Always ignored, exists for compatibility.
-        groups : array-like of shape (n_samples,)
+        group : array-like of shape (n_samples,)
             Group labels for the samples used while splitting the dataset into
             train/test set.
         Yields
@@ -66,10 +66,10 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
         test : ndarray
             The testing set indices for that split.
         """
-        if groups is None:
+        if group is None:
             raise ValueError(
-                "The 'groups' parameter should not be None")
-        X, y, groups = indexable(X, y, groups)
+                "The 'group' parameter should not be None")
+        X, y, group = indexable(X, y, group)
         n_samples = _num_samples(X)
         n_splits = self.n_splits
         group_gap = self.group_gap
@@ -77,19 +77,19 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
         max_train_group_size = self.max_train_group_size
         n_folds = n_splits + 1
         group_dict = {}
-        u, ind = np.unique(groups, return_index=True)
+        u, ind = np.unique(group, return_index=True)
         unique_groups = u[np.argsort(ind)]
         n_samples = _num_samples(X)
         n_groups = _num_samples(unique_groups)
         for idx in np.arange(n_samples):
-            if (groups[idx] in group_dict):
-                group_dict[groups[idx]].append(idx)
+            if (group[idx] in group_dict):
+                group_dict[group[idx]].append(idx)
             else:
-                group_dict[groups[idx]] = [idx]
+                group_dict[group[idx]] = [idx]
         if n_folds > n_groups:
             raise ValueError(
                 ("Cannot have number of folds={0} greater than"
-                 " the number of groups={1}").format(n_folds,
+                 " the number of group={1}").format(n_folds,
                                                      n_groups))
         print('n_groups:{},n_folds:{},n_splits:{}'.format(n_groups,n_folds,n_splits))
         group_test_size = min(n_groups // n_folds, max_test_group_size)
@@ -129,15 +129,15 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
             yield [int(i) for i in train_array], [int(i) for i in test_array]
 
 
-    def split_2(self, X, y=None, groups=None, train_test_size_ratio=4,splits_minus=0):
+    def split_2(self, X, y=None, group=None, train_test_size_ratio=4,splits_minus=0):
         """Split dataset into n_splits with following rules:
         1.train_group_size is train_test_size_ratio times test_group_size
-        2.if concatenating test_groups in different splits, they are continuous
+        2.if concatenating test_group in different splits, they are continuous
         3.we will drop the data in the beginning instead of the end to satisfy the max_size requirements"""
 
-        if groups is None: raise ValueError("The 'groups' parameter should not be None")
+        if group is None: raise ValueError("The 'group' parameter should not be None")
 
-        X, y, groups = indexable(X, y, groups)
+        X, y, group = indexable(X, y, group)
         n_samples = _num_samples(X)
         n_splits = self.n_splits - splits_minus
         group_gap = self.group_gap
@@ -145,20 +145,20 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
         max_train_group_size = self.max_train_group_size
 
         group_dict = {}
-        u, ind = np.unique(groups, return_index=True)
+        u, ind = np.unique(group, return_index=True)
         unique_groups = u[np.argsort(ind)]
         n_groups = _num_samples(unique_groups)
 
         for idx in np.arange(n_samples):
-            if (groups[idx] in group_dict):
-                group_dict[groups[idx]].append(idx)
+            if (group[idx] in group_dict):
+                group_dict[group[idx]].append(idx)
             else:
-                group_dict[groups[idx]] = [idx]
+                group_dict[group[idx]] = [idx]
 
         print('n_groups:{},n_splits:{}'.format(n_groups, n_splits))
 
         group_unit_size = int(np.ceil((n_groups-group_gap) / (n_splits+train_test_size_ratio)))
-        if group_unit_size <= 0: raise ValueError('The nums of groups is too small to do split')
+        if group_unit_size <= 0: raise ValueError('The nums of group is too small to do split')
 
         group_test_size = min(group_unit_size, max_test_group_size)
         group_test_starts = range(n_groups - n_splits*group_test_size, n_groups, group_test_size)
@@ -189,26 +189,26 @@ class PurgedGroupTimeSeriesSplit(_BaseKFold):
             yield [int(i) for i in train_array], [int(i) for i in test_array]
 
 
-def transform_groups(groups):
-    """Transform a groups list in any types into a numerical type"""
+def transform_group(group):
+    """Transform a group list in any types into a numerical type"""
 
-    u = np.unique(groups)
+    u = np.unique(group)
     transform_dict = {}
     for i in range(len(u)):
         transform_dict[u[i]] = i
-    for i in range(len(groups)):
-        groups[i] = transform_dict[groups[i]]
+    for i in range(len(group)):
+        group[i] = transform_dict[group[i]]
 
-    return groups
+    return group
 
 
-def calculate_ic(y_true,y_pred,groups):
-    """Given a sorted groups list and corresponded y_true and y_pred,
-    Return a list of unique values in groups and a list of ic between y_true and y_pred
+def calculate_ic(y_true,y_pred,group):
+    """Given a sorted group list and corresponded y_true and y_pred,
+    Return a list of unique values in group and a list of ic between y_true and y_pred
     """
     
-    u,ind = np.unique(groups, return_index=True)
-    ind = np.append(ind,len(groups))
+    u,ind = np.unique(group, return_index=True)
+    ind = np.append(ind,len(group))
 
     ic = []
     for i in range(len(u)):
@@ -220,7 +220,7 @@ def calculate_ic(y_true,y_pred,groups):
     return u, ic
 
 
-def plot_ic(y,test_index_list,y_pred_list,groups,ma=1,continuous=False):
+def plot_ic(y,test_index_list,y_pred_list,group,ma=1,continuous=False):
     """Plot the ic in each group for each splited test dateset
     if continuous: plot all cv_test_ic in one figure, this requires using cv.split_2() when getting the index_list
     """
@@ -230,15 +230,15 @@ def plot_ic(y,test_index_list,y_pred_list,groups,ma=1,continuous=False):
         tmp_index = sum(test_index_list,[])
         tmp_y_true = y[tmp_index]
         tmp_y_pred = np.concatenate(y_pred_list)
-        tmp_groups = groups[tmp_index]
+        tmp_group = group[tmp_index]
 
-        u,ic = calculate_ic(tmp_y_true, tmp_y_pred, tmp_groups)
+        u,ic = calculate_ic(tmp_y_true, tmp_y_pred, tmp_group)
         ma_ic = np.concatenate(([np.nan]*(ma-1),np.convolve(ic,np.ones(ma),'valid')/ma))
 
         ax.plot(u,ic)
         ax.plot(u,ma_ic,color='red')
         ax.set_xticks(np.arange(0,len(u),len(u)//4))
-        ax.set_title('IC for: {} ~ {} (MA:{})'.format(tmp_groups[0],tmp_groups[-1],ma))
+        ax.set_title('IC for: {} ~ {} (MA:{})'.format(tmp_group[0],tmp_group[-1],ma))
         plt.text(0.35,0.92,'IC_mean: {}'.format(np.array(ic).mean()), bbox=dict(facecolor='yellow', alpha=0.5), transform = ax.transAxes)
 
     else:
@@ -249,16 +249,55 @@ def plot_ic(y,test_index_list,y_pred_list,groups,ma=1,continuous=False):
             tmp_index = test_index_list[i]
             tmp_y_true = y[tmp_index]
             tmp_y_pred = y_pred_list[i]
-            tmp_groups = groups[tmp_index]
+            tmp_group = group[tmp_index]
 
-            u,ic = calculate_ic(tmp_y_true, tmp_y_pred, tmp_groups)
+            u,ic = calculate_ic(tmp_y_true, tmp_y_pred, tmp_group)
             ma_ic = np.concatenate(([np.nan]*(ma-1),np.convolve(ic,np.ones(ma),'valid')/ma))
 
             ax = fig.add_subplot((n_splits//3+1),3,i+1)
             ax.plot(u,ic)
             ax.plot(u,ma_ic,color='red')
             ax.set(xticks=np.arange(0,len(u),len(u)//4))
-            ax.set_title('IC for cv_split:{}: {} ~ {} (MA:{})'.format(i+1,tmp_groups[0],tmp_groups[-1],ma))
+            ax.set_title('IC for cv_split:{}: {} ~ {} (MA:{})'.format(i+1,tmp_group[0],tmp_group[-1],ma))
+            plt.text(0.25,0.92,'IC_mean: {}'.format(np.array(ic).mean()), bbox=dict(facecolor='yellow', alpha=0.5), transform = ax.transAxes)
+
+def plot_ic(y_true,y_pred,group,ma=1,continuous=False):
+    """Plot the ic in each group for each splited test dateset
+    if continuous: plot all cv_test_ic in one figure, this requires using cv.split_2() when getting the index_list
+    """
+
+    if continuous:
+        fig, ax = plt.subplots(figsize=(10,6))
+        tmp_y_true = y_true
+        tmp_y_pred = y_pred
+        tmp_group = group
+
+        u,ic = calculate_ic(tmp_y_true, tmp_y_pred, tmp_group)
+        ma_ic = np.concatenate(([np.nan]*(ma-1),np.convolve(ic,np.ones(ma),'valid')/ma))
+
+        ax.plot(u,ic)
+        ax.plot(u,ma_ic,color='red')
+        ax.set_xticks(np.arange(0,len(u),len(u)//4))
+        ax.set_title('IC for: {} ~ {} (MA:{})'.format(tmp_group[0],tmp_group[-1],ma))
+        plt.text(0.35,0.92,'IC_mean: {}'.format(np.array(ic).mean()), bbox=dict(facecolor='yellow', alpha=0.5), transform = ax.transAxes)
+
+    else:
+        n_splits = len(y_true)
+        fig = plt.figure(figsize=(20,(n_splits//3+1)*5))
+
+        for i in range(n_splits):
+            tmp_y_true = y_true[i]
+            tmp_y_pred = y_pred[i]
+            tmp_group = group[i]
+
+            u,ic = calculate_ic(tmp_y_true, tmp_y_pred, tmp_group)
+            ma_ic = np.concatenate(([np.nan]*(ma-1),np.convolve(ic,np.ones(ma),'valid')/ma))
+
+            ax = fig.add_subplot((n_splits//3+1),3,i+1)
+            ax.plot(u,ic)
+            ax.plot(u,ma_ic,color='red')
+            ax.set(xticks=np.arange(0,len(u),len(u)//4))
+            ax.set_title('IC for cv_split:{}: {} ~ {} (MA:{})'.format(i+1,tmp_group[0],tmp_group[-1],ma))
             plt.text(0.25,0.92,'IC_mean: {}'.format(np.array(ic).mean()), bbox=dict(facecolor='yellow', alpha=0.5), transform = ax.transAxes)
 
 
